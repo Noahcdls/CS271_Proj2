@@ -18,7 +18,7 @@ int token;
 
 
 
-void * server_accept_thread(void *args){
+void * server_accept_thread(void *args){//runs forever
     connect_sock = accept(sockfd,
                        (struct sockaddr *)&cli_addr,
                        &clilen); // accept a connection
