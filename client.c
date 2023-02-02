@@ -15,7 +15,15 @@ socklen_t clilen;
 struct sockaddr_in serv_addr, cli_addr;
 int connect_sock, sockfd, client_no;
 int read_socket_fds[NUM_CLIENTS], send_socket_fds[NUM_CLIENTS]; // server = read, client = send
-int token;
+int token = 0;
+
+snap my_state[NUM_CLIENTS];//in case everyone wants a snapshot
+uint32_t markers_in [NUM_CLIENTS][NUM_CLIENTS];//track who have I received from, 2D for multiple snapshots
+uint32_t active_markers[NUM_CLIENTS];//check who has initiated markers
+
+gsnap my_global_state;
+uint32_t awaiting_snaps;
+
 
 char ip_addrs[NUM_CLIENTS][16];
 uint32_t cli_ports[NUM_CLIENTS];
@@ -28,7 +36,6 @@ pthread_mutex_t rw_lock;
 
 void cleanup()
 {
-
 
     for (int i = 0; i < NUM_CLIENTS; i++)
     {
@@ -56,7 +63,6 @@ void cleanup()
     return;
 }
 
-
 void *server_read_thread(void *args)
 {
     arg *my_args = args;
@@ -67,19 +73,84 @@ void *server_read_thread(void *args)
     while (1)
     {
         n = read(my_sock, buff, sizeof(buff));
-        if(n <= 0){
-            if(send_threads[conn_client] != NULL)
-            pthread_cancel(*send_threads[conn_client]);
+        if (n <= 0)
+        {
+            read_socket_fds[conn_client] = 0;
             close(my_sock);
             break;
-            pthread_cancel(*send_threads[conn_client]);
-            printf("Server read ending for %c\n", client_names[conn_client]);
-            return NULL;
         }
-        printf("%s", (char *)buff);
-        sleep(3);
+        sleep(3); // 3 second delay as prescribed on handout
+        switch (buff[0])
+        {
+        case TOKEN:
+            float chance = (float)rand() / (float)RAND_MAX;
+            if (chance > lose_chance)
+            { // beat the odds of losing
+                uint32_t client_to_send_token;
+                do
+                {
+                    client_to_send_token = rand() % NUM_CLIENTS;
+                    if (client_out[client_no][client_to_send_token] == 1)
+                    {
+                        next_token_loc = client_to_send_token;
+                    }
+                } while (client_out[client_no][client_to_send_token] != 1);
+                token++;
+            }
+        case MARKER:
+            marker * new_marker;
+            memcpy(new_marker, buff[1], sizeof(marker));
+
+            if(active_markers[new_marker->marker_id] == 0){//check if you have received marker from this initiator
+                for(int i = 0; i < NUM_CLIENTS; i++){
+                    markers_in[new_marker->marker_id][i] = client_in[client_no][i];//write in read channels
+                    if(i == conn_client){
+                        markers_in[new_marker->marker_id][i] = 0;//clear channel the marker came from
+                    }
+                    if(client_out[client_no][i] == 1 && send_socket_fds[i] != 0){//send out 
+                        buff[0] = MARKER;
+                        marker send_mark = {new_marker->marker_id, client_no};
+                        memcpy(buff+1, &send_mark, sizeof(marker));
+                        send(send_socket_fds[i] ,buff, sizeof(buff), 0);
+                    }
+                } 
+                active_markers[new_marker->marker_id] = 1;//add active marker so incoming can add messages
+            }
+            else{//add behavior to add messages from this channel
+
+            }
+        case SNAP_BACK:
+            memcpy(&my_global_state.snapshots[conn_client], buff+1, sizeof(snap));
+            awaiting_snaps--;
+            if(awaiting_snaps == 0){
+                printf("FINISHED GLOBAL SNAPSHOT. NOW PRINTING\n");
+                for(int i = 0; i < NUM_CLIENTS; i++){
+                    printf("CLIENT %c SNAPSHOT:\n", client_names[i]);
+                    printf("TOKENS: %d\n", my_global_state.snapshots[i].tokens);//print tokens
+                    for(int j = 0; j < 64; j++){//go through messages saved
+                        uint32_t sender = my_global_state.snapshots[i].msglist[j].sender;
+                        uint32_t messg = my_global_state.snapshots[i].msglist[j].msg_type;
+                        if(sender == 0)
+                            break;
+                        else{
+                            switch(messg){
+                                case TOKEN:
+                                    printf("TOKEN MSG FROM CLIENT %c\n", client_names[sender]);
+                                case MARKER:
+                                    printf("MARKER MSG FROM CLIENT %c\n", client_names[sender]);
+                                case SNAP_BACK:
+                                    ("SNAPSHOT RETURNED FROM CLIENT %c\n", client_names[sender]);
+                            }
+                            printf("\n");
+                        }
+                    }
+                }
+            }
+
+
+        }
     }
-            printf("Server read ending for %c\n", client_names[conn_client]);
+    printf("Server read ending for %c\n", client_names[conn_client]);
 
     return NULL;
 }
@@ -92,19 +163,21 @@ void *client_send_thread(void *args)
     uint8_t buff[128];
     while (1)
     {
-        sprintf(buff, "MESSAGE FROM %d\n", client_no);
-        n = send(my_sock, buff, sizeof(buff), MSG_NOSIGNAL);
-        if(n <= 0){
-            close(my_sock);
-            break;
-            pthread_cancel(*read_threads[conn_client]);
-            printf("Client send ending for %c\n", client_names[conn_client]);
-            return NULL;
+
+        if (token && conn_client == next_token_loc)
+        {
+            sleep(1);
+            buff[0] = TOKEN;
+            n = send(my_sock, buff, sizeof(buff), 0);
+            if (n <= 0)
+            {
+                send_socket_fds[conn_client] = 0;
+                close(my_sock);
+                break;
+            }
         }
-        printf("WROTE MESSAGE TO %c\n", client_names[conn_client]);
-        sleep(10);
     }
-                printf("Client send ending for %c\n", client_names[conn_client]);
+    printf("Client send ending for %c\n", client_names[conn_client]);
 
     return NULL;
 }
@@ -112,24 +185,25 @@ void *client_send_thread(void *args)
 void *server_accept_thread(void *args)
 { // runs forever
     arg serv_args;
-    while(1){
-    connect_sock = accept(sockfd,
-                          (struct sockaddr *)&cli_addr,
-                          &clilen); // accept a connection
-    uint8_t buffer[32];
-    read(connect_sock, buffer, 32);
-    for (int i = 0; i < NUM_CLIENTS; i++)
+    while (1)
     {
-        if (buffer[0] == client_names[i] && i != client_no)
+        connect_sock = accept(sockfd,
+                              (struct sockaddr *)&cli_addr,
+                              &clilen); // accept a connection
+        uint8_t buffer[32];
+        read(connect_sock, buffer, 32);
+        for (int i = 0; i < NUM_CLIENTS; i++)
         {
-            read_socket_fds[i] = connect_sock;
-            read_threads[i] = malloc(sizeof(pthread_t));
-            serv_args.connected_client = i;
-            serv_args.socket = connect_sock;
-            pthread_create(read_threads[i], 0, &server_read_thread, &serv_args);
-            break;
+            if (buffer[0] == client_names[i] && i != client_no)
+            {
+                read_socket_fds[i] = connect_sock;
+                read_threads[i] = malloc(sizeof(pthread_t));
+                serv_args.connected_client = i;
+                serv_args.socket = connect_sock;
+                pthread_create(read_threads[i], 0, &server_read_thread, &serv_args);
+                break;
+            }
         }
-    }
     }
 }
 
@@ -257,7 +331,8 @@ int main(int argc, char *argv[])
     }
     printf("Finished connecting to all clients\n");
     signal(SIGINT, cleanup);
-    while(1);
+    while (1)
+        ;
     printf("LEAVING\n");
     return 0;
 }

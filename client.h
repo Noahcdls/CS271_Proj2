@@ -11,6 +11,9 @@
 #include <arpa/inet.h>
 #include "config.h"
 
+float lose_chance;
+uint32_t next_token_loc;
+
 enum msg_types{
     TOKEN = 1,
     MARKER,
@@ -40,7 +43,7 @@ typedef struct global_snapshot gsnap;
 
 
 struct snapshot_marker{
-    uint32_t marker_id;
+    uint32_t marker_id;//initiator
     uint32_t sender_id;//marker id for who initiated, sender for who to send back to
 };
 typedef struct snapshot_marker marker;
