@@ -3,6 +3,7 @@
         "unistd.h": "c",
         "string.h": "c",
         "types.h": "c",
-        "in.h": "c"
+        "in.h": "c",
+        "socket.h": "c"
     }
 }

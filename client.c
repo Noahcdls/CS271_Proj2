@@ -18,8 +18,10 @@ int read_socket_fds[NUM_CLIENTS], send_socket_fds[NUM_CLIENTS]; // server = read
 int token = 0;
 
 snap my_state[NUM_CLIENTS];//in case everyone wants a snapshot
-uint32_t markers_in [NUM_CLIENTS][NUM_CLIENTS];//track who have I received from, 2D for multiple snapshots
+uint32_t markers_in [NUM_CLIENTS][NUM_CLIENTS];//track who have I received a marker from on incoming channels
+//1D - iniator of snapshot; 2D - Incoming channels that have received a marker
 uint32_t active_markers[NUM_CLIENTS];//check who has initiated markers
+rec_msg * saved_msgs [NUM_CLIENTS][NUM_CLIENTS];//1D for marker initiator, 2D for incoming channel
 
 gsnap my_global_state;
 uint32_t awaiting_snaps;
@@ -101,11 +103,13 @@ void *server_read_thread(void *args)
             marker * new_marker;
             memcpy(new_marker, buff[1], sizeof(marker));
 
-            if(active_markers[new_marker->marker_id] == 0){//check if you have received marker from this initiator
+            if(active_markers[new_marker->marker_id] == 0){//first time receiving a marker
                 for(int i = 0; i < NUM_CLIENTS; i++){
-                    markers_in[new_marker->marker_id][i] = client_in[client_no][i];//write in read channels
+                    // markers_in[new_marker->marker_id][i] = client_in[client_no][i];//write in read channels
+                    markers_in[new_marker->marker_id][i] = 0;//clear out markers received. Will eventually match incoming channels in conf.h
                     if(i == conn_client){
-                        markers_in[new_marker->marker_id][i] = 0;//clear channel the marker came from
+                        // markers_in[new_marker->marker_id][i] = 0;//clear channel the marker came from
+                        markers_in[new_marker->marker_id][i] = 1;//already have received 1 by default from sender
                     }
                     if(client_out[client_no][i] == 1 && send_socket_fds[i] != 0){//send out 
                         buff[0] = MARKER;
@@ -116,7 +120,27 @@ void *server_read_thread(void *args)
                 } 
                 active_markers[new_marker->marker_id] = 1;//add active marker so incoming can add messages
             }
-            else{//add behavior to add messages from this channel
+            else{//I now know I have an active marker for one client
+                markers_in[new_marker->marker_id][conn_client]++;//increment
+                if(markers_in[new_marker->marker_id][conn_client] > 1){//not first time receiving marker on channel
+                    //add messages we have left out
+                }
+
+                for(int j =0; j<NUM_CLIENTS; j++){
+                    if(markers_in[new_marker->marker_id][j] < client_in[client_no][j])
+                        break;
+                    if(j == NUM_CLIENTS-1){//we have validated that we have received markers on all incoming channels
+                        active_markers[new_marker->marker_id] = 0;
+                        for(int k = 0; k < NUM_CLIENTS; k++){//go through all saved msgs and add them to snapshot
+                            if(client_in[client_no][k] == 0)
+                                continue;
+                            //add msgs from linked list
+
+                        }
+                    }
+                }
+
+
 
             }
         case SNAP_BACK:
