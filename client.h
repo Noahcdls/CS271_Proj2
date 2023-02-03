@@ -11,9 +11,6 @@
 #include <arpa/inet.h>
 #include "config.h"
 
-float lose_chance;
-uint32_t next_token_loc;
-
 enum msg_types{
     TOKEN = 1,
     MARKER,
