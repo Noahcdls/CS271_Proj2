@@ -17,16 +17,15 @@ int connect_sock, sockfd, client_no;
 int read_socket_fds[NUM_CLIENTS], send_socket_fds[NUM_CLIENTS]; // server = read, client = send
 int token = 0;
 
-snap my_state[NUM_CLIENTS];//in case everyone wants a snapshot
-uint32_t markers_in [NUM_CLIENTS][NUM_CLIENTS];//track who have I received a marker from on incoming channels
-//1D - iniator of snapshot; 2D - Incoming channels that have received a marker
-uint32_t active_markers[NUM_CLIENTS];//check who has initiated markers
-rec_msg * saved_msgs [NUM_CLIENTS][NUM_CLIENTS];//1D for marker initiator, 2D for incoming channel
-rec_msg * tail_msg [NUM_CLIENTS][NUM_CLIENTS];
+snap my_state[NUM_CLIENTS];                    // in case everyone wants a snapshot
+uint32_t markers_in[NUM_CLIENTS][NUM_CLIENTS]; // track who have I received a marker from on incoming channels
+// 1D - iniator of snapshot; 2D - Incoming channels that have received a marker
+uint32_t active_markers[NUM_CLIENTS];          // check who has initiated markers
+rec_msg *saved_msgs[NUM_CLIENTS][NUM_CLIENTS]; // 1D for marker initiator, 2D for incoming channel
+rec_msg *tail_msg[NUM_CLIENTS][NUM_CLIENTS];
 
 gsnap my_global_state;
 uint32_t awaiting_snaps;
-
 
 char ip_addrs[NUM_CLIENTS][16];
 uint32_t cli_ports[NUM_CLIENTS];
@@ -72,7 +71,7 @@ void *server_read_thread(void *args)
     uint32_t my_sock = my_args->socket;
     uint32_t conn_client = my_args->connected_client;
     int n;
-    uint8_t buff[128];
+    uint8_t buff[1024];
     while (1)
     {
         n = read(my_sock, buff, sizeof(buff));
@@ -98,81 +97,89 @@ void *server_read_thread(void *args)
                         next_token_loc = client_to_send_token;
                     }
                 } while (client_out[client_no][client_to_send_token] != 1);
-                token++;//add token to possession
+                token++; // add token to possession
             }
         case MARKER:
-            marker * new_marker;
+            marker *new_marker;
             memcpy(new_marker, buff[1], sizeof(marker));
 
-            if(active_markers[new_marker->marker_id] == 0){//first time receiving a marker
-                for(int i = 0; i < NUM_CLIENTS; i++){
+            if (active_markers[new_marker->marker_id] == 0)
+            { // first time receiving a marker
+                for (int i = 0; i < NUM_CLIENTS; i++)
+                {
                     // markers_in[new_marker->marker_id][i] = client_in[client_no][i];//write in read channels
-                    markers_in[new_marker->marker_id][i] = 0;//clear out markers received. Will eventually match incoming channels in conf.h
-                    if(i == conn_client){
+                    markers_in[new_marker->marker_id][i] = 0; // clear out markers received. Will eventually match incoming channels in conf.h
+                    if (i == conn_client)
+                    {
                         // markers_in[new_marker->marker_id][i] = 0;//clear channel the marker came from
-                        markers_in[new_marker->marker_id][i] = 1;//already have received 1 by default from sender
+                        markers_in[new_marker->marker_id][i] = 1; // already have received 1 by default from sender
                     }
-                    if(client_out[client_no][i] == 1 && send_socket_fds[i] != 0){//send out 
+                    if (client_out[client_no][i] == 1 && send_socket_fds[i] != 0)
+                    { // send out
                         buff[0] = MARKER;
                         marker send_mark = {new_marker->marker_id, client_no};
-                        memcpy(buff+1, &send_mark, sizeof(marker));
-                        send(send_socket_fds[i] ,buff, sizeof(buff), 0);
+                        memcpy(buff + 1, &send_mark, sizeof(marker));
+                        send(send_socket_fds[i], buff, sizeof(buff), 0);
                     }
-                } 
-                active_markers[new_marker->marker_id] = 1;//add active marker so incoming can add messages
+                }
+                active_markers[new_marker->marker_id] = 1; // add active marker so incoming can add messages
             }
-            else{//I now know I have an active marker for one client
-                markers_in[new_marker->marker_id][conn_client]++;//increment
-                if(markers_in[new_marker->marker_id][conn_client] > 1){//not first time receiving marker on channel
-                    //add messages we have left out
+            else
+            {                                                     // I now know I have an active marker for one client
+                markers_in[new_marker->marker_id][conn_client]++; // increment
+                if (markers_in[new_marker->marker_id][conn_client] > 1)
+                { // not first time receiving marker on channel
+                    // add messages we have left out
                 }
 
-                for(int j =0; j<NUM_CLIENTS; j++){
-                    if(markers_in[new_marker->marker_id][j] < client_in[client_no][j])
+                for (int j = 0; j < NUM_CLIENTS; j++)
+                {
+                    if (markers_in[new_marker->marker_id][j] < client_in[client_no][j])
                         break;
-                    if(j == NUM_CLIENTS-1){//we have validated that we have received markers on all incoming channels
+                    if (j == NUM_CLIENTS - 1)
+                    { // we have validated that we have received markers on all incoming channels
                         active_markers[new_marker->marker_id] = 0;
-                        for(int k = 0; k < NUM_CLIENTS; k++){//go through all saved msgs and add them to snapshot
-                            if(client_in[client_no][k] == 0)
-                                continue;
-                            //add msgs from linked list
-
+                        bzero(&(my_state[new_marker->marker_id]), sizeof(snap));
+                        my_state[new_marker->marker_id].my_id = client_no;//ID
+                        my_state[new_marker->marker_id].tokens = token;//Tokens if I have any
+                        uint32_t msgs_added = 0;
+                        for (int k = 0; k < NUM_CLIENTS; k++)
+                        { // go through all saved msgs and add them to snapshot
+                            // add msgs from linked list
+                            rec_msg *starting_msg = saved_msgs[new_marker->marker_id][k];
+                            while (starting_msg != NULL)
+                            {
+                                if(msgs_added < 64){//add messages with 64 max in queue
+                                    my_state[new_marker->marker_id].msglist[msgs_added] = (starting_msg)->saved_msg;//copy message
+                                    msgs_added++;
+                                }
+                                rec_msg *tmp_msg = starting_msg->next_msg;
+                                free(starting_msg);     // clear memory
+                                starting_msg = tmp_msg; // next message
+                            }
+                        }
+                        if (new_marker->marker_id != client_no)//send back
+                        { // dont
+                            buff[0] = SNAP_BACK;
+                            memcpy(buff + 1, my_state + new_marker->marker_id, sizeof(snap));
+                            send(send_socket_fds[new_marker->marker_id], buff, sizeof(buff), 0); // send back SNAPSHOT
+                        }
+                        else{//or if we initiated then add to our list of states
+                            my_global_state.snapshots[client_no] = my_state[new_marker->marker_id];
+                            awaiting_snaps--;
+                            if(awaiting_snaps == 0)//check if we are done
+                                print_global_state();
                         }
                     }
                 }
-
-
-
             }
         case SNAP_BACK:
-            memcpy(&my_global_state.snapshots[conn_client], buff+1, sizeof(snap));
+            memcpy(&(my_global_state.snapshots[conn_client]), buff + 1, sizeof(snap));
             awaiting_snaps--;
-            if(awaiting_snaps == 0){
-                printf("FINISHED GLOBAL SNAPSHOT. NOW PRINTING\n");
-                for(int i = 0; i < NUM_CLIENTS; i++){
-                    printf("CLIENT %c SNAPSHOT:\n", client_names[i]);
-                    printf("TOKENS: %d\n", my_global_state.snapshots[i].tokens);//print tokens
-                    for(int j = 0; j < 64; j++){//go through messages saved
-                        uint32_t sender = my_global_state.snapshots[i].msglist[j].sender;
-                        uint32_t messg = my_global_state.snapshots[i].msglist[j].msg_type;
-                        if(sender == 0)
-                            break;
-                        else{
-                            switch(messg){
-                                case TOKEN:
-                                    printf("TOKEN MSG FROM CLIENT %c\n", client_names[sender]);
-                                case MARKER:
-                                    printf("MARKER MSG FROM CLIENT %c\n", client_names[sender]);
-                                case SNAP_BACK:
-                                    ("SNAPSHOT RETURNED FROM CLIENT %c\n", client_names[sender]);
-                            }
-                            printf("\n");
-                        }
-                    }
-                }
+            if (awaiting_snaps == 0)
+            {
+                print_global_state();
             }
-
-
         }
     }
     printf("Server read ending for %c\n", client_names[conn_client]);
@@ -185,10 +192,9 @@ void *client_send_thread(void *args)
     uint32_t my_sock = my_args->socket;
     uint32_t conn_client = my_args->connected_client;
     int n;
-    uint8_t buff[128];
+    uint8_t buff[1024];
     while (1)
     {
-
         if (token && conn_client == next_token_loc)
         {
             sleep(1);
@@ -205,6 +211,36 @@ void *client_send_thread(void *args)
     printf("Client send ending for %c\n", client_names[conn_client]);
 
     return NULL;
+}
+
+void print_global_state()
+{
+    printf("FINISHED GLOBAL SNAPSHOT. NOW PRINTING\n");
+    for (int i = 0; i < NUM_CLIENTS; i++)
+    {
+        printf("CLIENT %c SNAPSHOT:\n", client_names[i]);
+        printf("TOKENS: %d\n", my_global_state.snapshots[i].tokens); // print tokens
+        for (int j = 0; j < 64; j++)
+        { // go through messages saved
+            uint32_t sender = my_global_state.snapshots[i].msglist[j].sender;
+            uint32_t messg = my_global_state.snapshots[i].msglist[j].msg_type;
+            if (sender == 0)
+                break;
+            else
+            {
+                switch (messg)
+                {
+                case TOKEN:
+                    printf("TOKEN MSG FROM CLIENT %c\n", client_names[sender]);
+                case MARKER:
+                    printf("MARKER MSG FROM CLIENT %c\n", client_names[sender]);
+                case SNAP_BACK:
+                    ("SNAPSHOT RETURNED FROM CLIENT %c\n", client_names[sender]);
+                }
+                printf("\n");
+            }
+        }
+    }
 }
 
 void *server_accept_thread(void *args)
@@ -230,6 +266,42 @@ void *server_accept_thread(void *args)
             }
         }
     }
+}
+
+void * terminal_thread(){
+    uint8_t buff[128];
+    while(1){
+        printf("WELCOME CLIENT %c. PLEASE SELECT AN OPTION\n.1. ADD TOKEN\n2. START SNAPSHOT\n3. CHANGE TOKEN LOSS PROBABILITY\n", client_names[client_no]);
+        fgets(buff, 128, stdin);
+        printf("\n");
+        uint8_t option = (uint8_t)atoi(buff);
+        switch(option){
+            case 1:
+                next_token_loc = rand()%NUM_CLIENTS;
+                token++;
+                break;
+            case 2: 
+                active_markers[client_no] = 1;
+                buff[0] = MARKER;
+                marker snap_marker = {client_no, client_no};
+                memcpy(buff+1, &snap_marker, sizeof(marker));
+                for(int i = 0; i < NUM_CLIENTS; i++)
+                    if(client_in[client_no][i] == 1)
+                        send(send_socket_fds[i], buff, sizeof(buff), 0);
+                while(active_markers[client_no] == 1);
+                break;
+            case 3:
+                printf("TYPE IN NEW PROBABILITY\n");
+                fgets(buff, 128, stdin);
+                lose_chance = atof(buff);
+                printf("\n");
+                break;
+            default:
+                break;
+        }
+        
+    }
+    return NULL;
 }
 
 int main(int argc, char *argv[])
