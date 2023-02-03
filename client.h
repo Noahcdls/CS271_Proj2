@@ -54,3 +54,9 @@ struct arguments {
 };
 
 typedef struct arguments arg;
+
+struct recorded_msgs{
+    msg saved_msg;
+    struct recorded_msgs * next_msg;
+};
+typedef struct recorded_msgs rec_msg;

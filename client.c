@@ -22,6 +22,7 @@ uint32_t markers_in [NUM_CLIENTS][NUM_CLIENTS];//track who have I received a mar
 //1D - iniator of snapshot; 2D - Incoming channels that have received a marker
 uint32_t active_markers[NUM_CLIENTS];//check who has initiated markers
 rec_msg * saved_msgs [NUM_CLIENTS][NUM_CLIENTS];//1D for marker initiator, 2D for incoming channel
+rec_msg * tail_msg [NUM_CLIENTS][NUM_CLIENTS];
 
 gsnap my_global_state;
 uint32_t awaiting_snaps;
@@ -97,7 +98,7 @@ void *server_read_thread(void *args)
                         next_token_loc = client_to_send_token;
                     }
                 } while (client_out[client_no][client_to_send_token] != 1);
-                token++;
+                token++;//add token to possession
             }
         case MARKER:
             marker * new_marker;
