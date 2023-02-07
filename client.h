@@ -17,9 +17,20 @@ enum msg_types{
     SNAP_BACK
 };
 
+#define MAX_MSGS 48
+
+struct snapshot_marker{
+    uint32_t marker_id;//initiator
+    uint32_t sender_id;//marker id for who initiated, sender for who to send back to
+};
+typedef struct snapshot_marker marker;
+
 struct message{
     uint32_t msg_type;
     uint32_t sender;
+    marker mark;
+    uint32_t clock_time;
+
 };
 
 typedef struct message msg;
@@ -28,7 +39,7 @@ typedef struct message msg;
 struct snapshot{
     uint8_t my_id;
     uint32_t tokens;
-    msg msglist[64];
+    msg msglist[MAX_MSGS];
 };
 typedef struct snapshot snap;
 
@@ -37,13 +48,6 @@ struct global_snapshot{
 };
 typedef struct global_snapshot gsnap;
 
-
-
-struct snapshot_marker{
-    uint32_t marker_id;//initiator
-    uint32_t sender_id;//marker id for who initiated, sender for who to send back to
-};
-typedef struct snapshot_marker marker;
 
 struct arguments {
     uint32_t connected_client;
