@@ -448,7 +448,7 @@ void *server_accept_thread(void *args)
     }
     send_threads[2] = malloc(sizeof(pthread_t));
     int client_counter = 0;
-    while (1)
+    while (1)//
     {
         do
         {
