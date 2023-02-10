@@ -265,6 +265,7 @@ void *poll_read_thread(void *args)
                         newest_msg->saved_msg.msg_type = buff[0];
                         newest_msg->saved_msg.sender = conn_client;
                         newest_msg->next_msg = NULL;
+                        newest_msg->saved_msg.mark = *new_marker;
                         newest_msg->saved_msg.clock_time = t_clock;
                         add_msg(newest_msg, new_marker->marker_id, conn_client);
                     }
@@ -288,21 +289,21 @@ void *poll_read_thread(void *args)
                             { // go through all saved msgs and add them to snapshot
                                 // add msgs from linked list
                                 uint32_t marker_counter = markers_in[new_marker->marker_id][k]; // amount of markers we captured on channel k
-                                if (marker_counter == 0)
-                                    continue;
-                                // printf("MARKER COUNTER: INIT BY %c CHANNEL %c %u\n\n", client_names[new_marker->marker_id], client_names[k], markers_in[new_marker->marker_id][k]);
+                                printf("MARKER COUNTER: INIT BY %c CHANNEL %c %u\n\n", client_names[new_marker->marker_id], client_names[k], marker_counter);
                                 rec_msg *starting_msg = saved_msgs[new_marker->marker_id][k]; // saved messages since marker id first sent snapshot request, messages from incoming channel k
                                 while (starting_msg != NULL)
                                 {
-                                    if (starting_msg->saved_msg.msg_type == MARKER && marker_counter && starting_msg->saved_msg.mark.marker_id == client_no)
+                                    if (starting_msg->saved_msg.msg_type == MARKER && marker_counter != 0 && starting_msg->saved_msg.mark.marker_id == new_marker->marker_id)
                                     { // remove one marker we have seen
                                         marker_counter -= 1;
+                                        printf("MARKER COUNTER = %u\n\n", marker_counter);
                                         // if(new_marker->marker_id == client_no)
                                         // printf("NEW MARKER COUNTER ON CHANNEL %c IS %u\n\n", client_names[k], marker_counter);
                                     }
                                     if (msgs_added < MAX_MSGS && marker_counter != 0)
                                     {                                                                                                              // add messages with MAX_MSGS as max in queue
                                         memcpy(&(my_state[new_marker->marker_id].msglist[msgs_added]), &((starting_msg)->saved_msg), sizeof(msg)); // copy message
+                                        printf("MESSAGE ADDED\n\n");
                                         // printf("MSG SENT: %u FROM CLIENT %c\n\n", (starting_msg)->saved_msg.msg_type, client_names[(starting_msg)->saved_msg.sender]);
                                         msgs_added++;
                                     }
@@ -427,7 +428,7 @@ void print_global_state()
     {
         printf("CLIENT %c SNAPSHOT:\n", client_names[i]);
         printf("TOKENS: %d\n", my_global_state.snapshots[i].tokens); // print tokens
-        for (int j = 0; j < 64; j++)
+        for (int j = 0; j < 48; j++)
         { // go through messages saved
             uint32_t sender = my_global_state.snapshots[i].msglist[j].sender;
             uint32_t messg = my_global_state.snapshots[i].msglist[j].msg_type;
@@ -520,7 +521,7 @@ void *terminal_handler(void *args)
             {
                 next_token_loc = rand() % NUM_CLIENTS;
             } while (client_out[client_no][next_token_loc] != 1);
-            printf("SENDING NEXT TO %u\n", next_token_loc);
+            // printf("SENDING NEXT TO %u\n", next_token_loc);
             token += 1;
             token_flag = 1;
             printf("ADDED TOKEN. NOW HAVE %d TOKENS\n", token);
